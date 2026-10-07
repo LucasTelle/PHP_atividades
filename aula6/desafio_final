@@ -1,0 +1,402 @@
+<?php
+
+// 1. ENTRADA DE DADOS (leitura do terminal)
+
+
+/**
+ * Le uma linha do teclado usando readline() e remove espacos nas pontas.
+ * readline() ja exibe o prompt e devolve a linha sem o "\n" final.
+ */
+function lerEntrada(string $mensagem): string
+{
+    $linha = readline($mensagem);
+    return trim($linha === false ? '' : $linha);
+}
+
+/**
+ * Gera um identificador automatico para a venda (numero + data/hora atual).
+ * Retorna um array associativo com "id" e "data".
+ */
+function gerarIdentificacaoVenda(): array
+{
+    return [
+        'id'   => 'V' . date('YmdHis') . rand(100, 999),
+        'data' => date('d/m/Y H:i:s'),
+    ];
+}
+
+/**
+ * Le os dados basicos do cliente: nome, tipo (comum/premium) e idade.
+ */
+function lerDadosCliente(): array
+{
+    echo "\n--- DADOS DO CLIENTE ---\n";
+
+    $nome = lerEntrada('Nome do cliente: ');
+
+    do {
+        $tipo = strtolower(lerEntrada('Tipo de cliente (comum/premium): '));
+        if (!in_array($tipo, ['comum', 'premium'], true)) {
+            echo "Tipo invalido. Digite 'comum' ou 'premium'.\n";
+        }
+    } while (!in_array($tipo, ['comum', 'premium'], true));
+
+    do {
+        $idadeTexto = lerEntrada('Idade do cliente: ');
+        $idadeValida = ctype_digit($idadeTexto) && (int) $idadeTexto > 0;
+        if (!$idadeValida) {
+            echo "Idade invalida. Informe um numero inteiro maior que zero.\n";
+        }
+    } while (!$idadeValida);
+
+    return [
+        'nome'  => $nome !== '' ? $nome : 'Nao informado',
+        'tipo'  => $tipo,
+        'idade' => (int) $idadeTexto,
+    ];
+}
+
+
+// 2. VALIDACAO
+
+
+/**
+ * Valida se o preco informado e um numero valido e maior que zero.
+ */
+function precoValido(string $texto): bool
+{
+    $texto = str_replace(',', '.', $texto);
+    return is_numeric($texto) && (float) $texto > 0;
+}
+
+/**
+ * Valida se a quantidade informada e um inteiro valido e maior que zero.
+ */
+function quantidadeValida(string $texto): bool
+{
+    return ctype_digit($texto) && (int) $texto > 0;
+}
+
+
+// 3. CADASTRO DE PRODUTOS (repeticao + estrutura de dados)
+
+
+/**
+ * Realiza o cadastro de produtos em loop ate que o usuario digite
+ * "ENCERRAR" como nome do produto. Produtos com preco/quantidade
+ * invalidos sao avisados e ignorados, sem interromper o cadastro.
+ * Retorna um array de produtos (cada produto e um array associativo).
+ */
+function cadastrarProdutos(): array
+{
+    $produtos = [];
+
+    echo "\n--- CADASTRO DE PRODUTOS ---\n";
+    echo "Digite ENCERRAR no campo 'nome' para finalizar o cadastro.\n";
+
+    while (true) {
+        echo "\nProduto " . (count($produtos) + 1) . ":\n";
+        $nome = lerEntrada('  Nome: ');
+
+        if (strtoupper($nome) === 'ENCERRAR') {
+            break;
+        }
+
+        $categoria      = lerEntrada('  Categoria: ');
+        $precoTexto     = lerEntrada('  Preco unitario (R$): ');
+        $quantidadeTexto = lerEntrada('  Quantidade: ');
+
+        if (!precoValido($precoTexto) || !quantidadeValida($quantidadeTexto)) {
+            echo "  >> Produto invalido (preco ou quantidade incorretos). Item ignorado.\n";
+            continue;
+        }
+
+        $preco      = (float) str_replace(',', '.', $precoTexto);
+        $quantidade = (int) $quantidadeTexto;
+
+        $produtos[] = [
+            'nome'       => $nome,
+            'categoria'  => $categoria !== '' ? $categoria : 'Sem categoria',
+            'preco'      => $preco,
+            'quantidade' => $quantidade,
+            'subtotal'   => calcularSubtotal($preco, $quantidade),
+        ];
+
+        echo "  >> Produto cadastrado com sucesso.\n";
+    }
+
+    return $produtos;
+}
+
+
+// 4. CALCULOS
+
+
+/**
+ * Calcula o subtotal de um item (preco unitario x quantidade).
+ */
+function calcularSubtotal(float $preco, int $quantidade): float
+{
+    return $preco * $quantidade;
+}
+
+/**
+ * Percorre os produtos validos e calcula o resumo da venda:
+ * quantidade de produtos diferentes, total de unidades, valor bruto,
+ * produto mais caro e produto mais barato (por preco unitario).
+ */
+function calcularResumoProdutos(array $produtos): array
+{
+    $quantidadeDiferentes = count($produtos);
+    $totalUnidades = 0;
+    $valorBruto = 0.0;
+    $maisCaro = null;
+    $maisBarato = null;
+
+    foreach ($produtos as $produto) {
+        $totalUnidades += $produto['quantidade'];
+        $valorBruto += $produto['subtotal'];
+
+        if ($maisCaro === null || $produto['preco'] > $maisCaro['preco']) {
+            $maisCaro = $produto;
+        }
+        if ($maisBarato === null || $produto['preco'] < $maisBarato['preco']) {
+            $maisBarato = $produto;
+        }
+    }
+
+    return [
+        'quantidadeDiferentes' => $quantidadeDiferentes,
+        'totalUnidades'        => $totalUnidades,
+        'valorBruto'           => $valorBruto,
+        'maisCaro'             => $maisCaro,
+        'maisBarato'           => $maisBarato,
+    ];
+}
+
+/**
+ * Determina o percentual de desconto de acordo com o valor bruto da compra.
+ */
+function determinarPercentualPorValor(float $valorBruto): float
+{
+    if ($valorBruto >= 1000) {
+        return 15.0;
+    }
+    if ($valorBruto >= 500) {
+        return 10.0;
+    }
+    if ($valorBruto >= 200) {
+        return 5.0;
+    }
+    return 0.0;
+}
+
+/**
+ * Calcula o percentual final de desconto, somando o percentual pelo valor
+ * bruto com os acrescimos por cliente premium, pagamento em pix e idade.
+ */
+function calcularPercentualDesconto(float $valorBruto, array $cliente, string $formaPagamento): float
+{
+    $percentual = determinarPercentualPorValor($valorBruto);
+
+    if ($cliente['tipo'] === 'premium') {
+        $percentual += 3.0;
+    }
+    if ($formaPagamento === 'pix') {
+        $percentual += 2.0;
+    }
+    if ($cliente['idade'] >= 60) {
+        $percentual += 2.0;
+    }
+
+    return $percentual;
+}
+
+/**
+ * Calcula o valor concedido em desconto e o valor final a pagar.
+ * Retorna um array com "valorDesconto" e "valorFinal".
+ */
+function calcularValoresFinais(float $valorBruto, float $percentualDesconto): array
+{
+    $valorDesconto = $valorBruto * ($percentualDesconto / 100);
+    $valorFinal = $valorBruto - $valorDesconto;
+
+    return [
+        'valorDesconto' => $valorDesconto,
+        'valorFinal'    => $valorFinal,
+    ];
+}
+
+/**
+ * Gera a simulacao de parcelamento de 1x a 6x sobre o valor final.
+ * Retorna um array [numeroDeParcelas => valorDaParcela].
+ */
+function simularParcelamento(float $valorFinal): array
+{
+    $simulacao = [];
+    for ($n = 1; $n <= 6; $n++) {
+        $simulacao[$n] = $valorFinal / $n;
+    }
+    return $simulacao;
+}
+
+/**
+ * Classifica a venda de acordo com o valor final recebido.
+ */
+function classificarVenda(float $valorFinal): string
+{
+    if ($valorFinal < 300) {
+        return 'VENDA PEQUENA';
+    }
+    if ($valorFinal < 1000) {
+        return 'VENDA MEDIA';
+    }
+    return 'VENDA DE ALTO VALOR';
+}
+
+
+/**
+ * Le e valida a forma de pagamento (pix, cartao ou dinheiro).
+ */
+function lerFormaPagamento(): string
+{
+    $formasValidas = ['pix', 'cartao', 'dinheiro'];
+
+    do {
+        $forma = strtolower(lerEntrada("\nForma de pagamento (pix/cartao/dinheiro): "));
+        if (!in_array($forma, $formasValidas, true)) {
+            echo "Forma de pagamento invalida.\n";
+        }
+    } while (!in_array($forma, $formasValidas, true));
+
+    return $forma;
+}
+
+/**
+ * Le a quantidade de parcelas escolhida pelo cliente (1 a 6), quando o
+ * pagamento for feito no cartao.
+ */
+function lerNumeroParcelas(): int
+{
+    do {
+        $texto = lerEntrada('Em quantas parcelas (1 a 6)? ');
+        $valido = ctype_digit($texto) && (int) $texto >= 1 && (int) $texto <= 6;
+        if (!$valido) {
+            echo "Numero de parcelas invalido. Escolha entre 1 e 6.\n";
+        }
+    } while (!$valido);
+
+    return (int) $texto;
+}
+
+// ============================================================
+// 6. EXIBICAO DE INFORMACOES (comprovante e relatorio)
+// ============================================================
+
+function formatarMoeda(float $valor): string
+{
+    return 'R$ ' . number_format($valor, 2, ',', '.');
+}
+
+/**
+ * Exibe o comprovante da venda: identificacao, cliente e produtos.
+ */
+function exibirComprovante(array $identificacao, array $cliente, array $produtos, string $formaPagamento, ?array $simulacaoParcelas, ?int $parcelasEscolhidas): void
+{
+    echo "\n==============================================\n";
+    echo "           COMPROVANTE DE VENDA\n";
+    echo "==============================================\n";
+    echo "Venda: {$identificacao['id']}\n";
+    echo "Data: {$identificacao['data']}\n";
+    echo "----------------------------------------------\n";
+    echo "Cliente: {$cliente['nome']} ({$cliente['tipo']}, {$cliente['idade']} anos)\n";
+    echo "----------------------------------------------\n";
+    echo "Produtos:\n";
+
+    foreach ($produtos as $produto) {
+        printf(
+            "- %s | %s | %s x %d = %s\n",
+            $produto['nome'],
+            $produto['categoria'],
+            formatarMoeda($produto['preco']),
+            $produto['quantidade'],
+            formatarMoeda($produto['subtotal'])
+        );
+    }
+
+    echo "----------------------------------------------\n";
+    echo 'Forma de pagamento: ' . ucfirst($formaPagamento) . "\n";
+
+    if ($formaPagamento === 'cartao' && $simulacaoParcelas !== null) {
+        echo "Parcelas escolhidas: {$parcelasEscolhidas}x\n";
+        echo "\nSimulacao de parcelamento (1x a 6x):\n";
+        foreach ($simulacaoParcelas as $numero => $valorParcela) {
+            echo "  {$numero}x de " . formatarMoeda($valorParcela) . "\n";
+        }
+    }
+
+    echo "==============================================\n";
+}
+
+/**
+ * Exibe o relatorio gerencial da venda com os indicadores solicitados.
+ */
+function exibirRelatorioGerencial(array $resumo, float $percentualDesconto, array $valoresFinais, string $classificacao): void
+{
+    echo "\n---------- RELATORIO GERENCIAL ----------\n";
+    echo "Quantidade de produtos diferentes: {$resumo['quantidadeDiferentes']}\n";
+    echo "Quantidade total de unidades vendidas: {$resumo['totalUnidades']}\n";
+    echo 'Produto mais caro: ' . ($resumo['maisCaro']['nome'] ?? '-') . ' (' . formatarMoeda($resumo['maisCaro']['preco'] ?? 0) . ")\n";
+    echo 'Produto mais barato: ' . ($resumo['maisBarato']['nome'] ?? '-') . ' (' . formatarMoeda($resumo['maisBarato']['preco'] ?? 0) . ")\n";
+    echo 'Valor bruto: ' . formatarMoeda($resumo['valorBruto']) . "\n";
+    echo "Percentual de desconto: {$percentualDesconto}%\n";
+    echo 'Valor concedido em desconto: ' . formatarMoeda($valoresFinais['valorDesconto']) . "\n";
+    echo 'Valor final recebido: ' . formatarMoeda($valoresFinais['valorFinal']) . "\n";
+    echo "Classificacao da venda: {$classificacao}\n";
+    echo "------------------------------------------\n";
+}
+
+// ============================================================
+// 7. FLUXO PRINCIPAL DO PROGRAMA
+// ============================================================
+
+function executarVenda(): void
+{
+    echo "==============================================\n";
+    echo "      SENAC MARKET - REGISTRO DE VENDA\n";
+    echo "==============================================\n";
+
+    $identificacao = gerarIdentificacaoVenda();
+    echo "Venda iniciada: {$identificacao['id']} em {$identificacao['data']}\n";
+
+    $cliente = lerDadosCliente();
+    $produtos = cadastrarProdutos();
+
+    if (count($produtos) === 0) {
+        echo "\nNenhum produto valido foi cadastrado. Venda cancelada.\n";
+        return;
+    }
+
+    $resumo = calcularResumoProdutos($produtos);
+
+    $formaPagamento = lerFormaPagamento();
+
+    $percentualDesconto = calcularPercentualDesconto($resumo['valorBruto'], $cliente, $formaPagamento);
+    $valoresFinais = calcularValoresFinais($resumo['valorBruto'], $percentualDesconto);
+
+    $simulacaoParcelas = null;
+    $parcelasEscolhidas = null;
+
+    if ($formaPagamento === 'cartao') {
+        $parcelasEscolhidas = lerNumeroParcelas();
+        $simulacaoParcelas = simularParcelamento($valoresFinais['valorFinal']);
+    }
+
+    $classificacao = classificarVenda($valoresFinais['valorFinal']);
+
+    exibirComprovante($identificacao, $cliente, $produtos, $formaPagamento, $simulacaoParcelas, $parcelasEscolhidas);
+    exibirRelatorioGerencial($resumo, $percentualDesconto, $valoresFinais, $classificacao);
+}
+
+// Ponto de entrada do programa.
+executarVenda();
